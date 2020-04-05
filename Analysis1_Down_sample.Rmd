@@ -1,0 +1,408 @@
+---
+title: "Result Part 1: Downsampling Experiment"
+output: html_notebook
+---
+
+
+# Regulatory Netowrk Analysis
+
+- datasets from Misharin, Zeisel, PBMC 10X
+- Gene-Gene pearson Correlation
+- Cell-Cell Spearman Correlation
+- Stratified plots
+
+##Read in Data
+```{r}
+source('violin_plot.R')
+source('my_functions.R')
+library(colorout)
+# Correlation matrix distance (takes a while to run)
+ref.files <- list.files(path = 'Data',pattern = "ref", full.names = TRUE)
+samp.files <- list.files(path = 'Data',pattern = "ds.rds", full.names = TRUE)
+saver.files <- list.files(path = 'Data',pattern = "saver.rds", full.names = TRUE)
+g2s3.files <- list.files(path = 'Data',pattern = "g2s3.rds", full.names = TRUE)
+scimpute.files = list.files(path = 'Data',pattern = "scimpute.rds", full.names = TRUE)
+viper.files <- list.files(path = "Data", pattern = "viper.rds", full.names = T)
+dca.files <- list.files(path = "Data", pattern = "dca.rds", full.names = T)
+
+# 10/10/19 add magic
+magic.files = list.files(path = "Data", pattern = "magic.rds", full.names = T)
+
+dat <- vector("list", 3)
+names(dat) <- c("Misharin", "PBMC", "Zeisel")
+
+
+# methods evaluated: Saver, G2S3, scImpute, VIPER, DCA
+
+
+for (i in 1:3) {
+  print(i)
+  dat[[i]] <- vector("list", 16)
+  names(dat[[i]]) <- c("ref", "ds", "saver", "g2s3", "scImpute", "viper", "dca", "magic", "ref.norm", "ds.norm", "saver.norm", "g2s3.norm", "scImpute.norm", "viper.norm", "dca.norm", "magic.norm")
+  dat[[i]][[1]] <- readRDS(ref.files[i])
+  dat[[i]][[2]] <- readRDS(samp.files[i])
+  dat[[i]][[3]] <- readRDS(saver.files[i])$estimate
+  dat[[i]][[4]] <-  readRDS(g2s3.files[i])
+  dat[[i]][[5]] <- readRDS(scimpute.files[i])
+  dat[[i]][[6]] <- readRDS(viper.files[[i]][[1]])
+  dat[[i]][[7]] <- readRDS(dca.files[i])[-1,-1]
+  dat[[i]][[8]] <- readRDS(magic.files[i])
+
+#normalization
+  dat[[i]][[9]] <- normalizeData(dat[[i]][[1]]) # the one all methods compared to
+  dat[[i]][[10]] <- normalizeData(dat[[i]][[2]])
+  dat[[i]][[11]] <- normalizeData(dat[[i]][[3]])
+  dat[[i]][[12]] <- normalizeData(dat[[i]][[4]])
+  dat[[i]][[13]] <- normalizeData(dat[[i]][[5]])
+  dat[[i]][[14]] <- normalizeData(dat[[i]][[6]])
+  dat[[i]][[15]] <- normalizeData(dat[[i]][[7]])
+  dat[[i]][[16]] <- normalizeData(dat[[i]][[8]])
+
+}
+
+
+# add gene and cellnames to the dataset
+
+
+
+n.cells <- sapply(dat, function(x) ncol(x[[1]]))
+n.genes <- sapply(dat, function(x) nrow(x[[1]]))
+
+cell.names <- sapply(dat, function(x) colnames(x[[1]]))
+gene.names <- sapply(dat, function(x) rownames(x[[1]]))
+# saveRDS(dat, file = "Data/dat2rds") only has dca added
+saveRDS(dat, file = "Data/dat3rds") # has dca and magic
+```
+
+## Calculate Gene-wise and Cell-wise Correlation
+
+```{r}
+
+dat = readRDS('Data/dat3.rds')
+
+
+cor.dat = vector("list", 2)
+
+for (i in 1:2) {
+  cor.dat[[i]] <- vector("list", 3)
+  names(cor.dat[[i]]) <- names(dat)
+  for (j in 1:3) {
+    # compare 1 + 5methods
+    cor.dat[[i]][[j]] <- vector("list", 7)
+    names(cor.dat[[i]][[j]]) <- c("Obs", "SAVER", "g2s3", "scImpute", "viper", "dca", "magic")
+  }
+}
+
+for (i in 1:3) {
+  for (j in 1:7) {
+    # compare with normalized reference datset
+      ind <- 10:16
+      dimnames(dat[[i]][[ind[j]]]) = dimnames(dat[[i]][[9]])
+      cor.dat[[1]][[i]][[j]] <- get.cor.gene(dat[[i]][[9]], as.matrix(dat[[i]][[ind[j]]]), "pearson")
+      cor.dat[[2]][[i]][[j]] <- get.cor.cell(dat[[i]][[9]], dat[[i]][[ind[j]]], 'spearman')   
+  }
+}
+
+str(cor.dat)
+
+# saveRDS(cor.dat, file = 'Data/cor_dat2.rds') #only has dca added
+saveRDS(cor.dat, file = 'Data/cor_dat3.rds') #only has dca, magic added
+
+
+
+```
+
+
+## Generate Plots: Figure 1
+
+```{r}
+cor.dat  <- readRDS("Data/cor_dat3.rds")
+source("violin_plot.R")
+
+cor.dat= lapply(cor.dat , function(x) lapply(x, `[`, c(1, 3, 2, 7, 4, 5, 6)))
+names(cor.dat[[1]][[1]])
+
+ds.plot = function(){
+    par(mfrow = c(1, 2), cex.main = 1.5, mar = c(7, 2, 0, 1) + 0.1, oma = c(1, 3, 3, 0), 
+      mgp = c(3.5, 1, 0),
+      cex.lab = 1.6, font.lab = 2, cex.axis = 1.6, bty = "n", las = 1, xpd = NA)
+
+  x <- c(1, 2, 3)
+  plot(x, c(-5, -5, -5), type = "p", ylab = " ", xlab = " ", cex = 1.5, 
+       ylim = c(0.0, 1), xlim = c(1, 9), lwd = 2, pch = 5, axes = FALSE, main = " ")
+
+  axis(1, at = c(2.1, 4.6, 7.1), labels = FALSE)
+  text(c(2.1, 4.6, 7.1), par()$usr[3]-0.07,
+       labels = c("Reyfman", "PBMC", "Zeisel"), srt = 45, adj = 1, 
+       xpd = TRUE, cex = 1.6)
+  axis(2, pos = 1.1)
+  par(las = 0)
+  mtext("Correlation with Reference", side = 2, line = 3, cex = 1.6)
+
+  fill <- c("white", "#cb181d", "#6baed6",'#8491B4B2', "#bae4b3", 'orange', "#FFD700" )
+
+  xloc <- seq(1.5, by = 0.25, length.out = 7)
+
+
+  for (i in 1:3) {
+    for (j in 1:7) {
+      boxplot.ej(cor.dat[[1]][[i]][[j]], xloc = xloc[j]+2.2*(i-1), 
+                 cex.boxpoint = ps, fill = fill[j])
+    }
+  }
+
+
+  x <- c(1, 2, 3)
+  plot(x, c(-5, -5, -5), type = "p", ylab = " ", xlab = " ", cex = 1.5, 
+       ylim = c(0.4, 1), xlim = c(1, 9), lwd = 2, pch = 5, axes = FALSE, main = " ")
+
+  axis(1, at = c(2.1, 4.6, 7.1), labels = FALSE)
+
+
+  text(c(2.1, 4.6, 7.1), par()$usr[3]-0.05,
+        labels = c("Reyfman", "PBMC", "Zeisel"), srt = 45, adj = 1, 
+       xpd = TRUE, cex = 1.6)
+  par(las = 1)
+  axis(2, pos = 1.1)
+  par(las = 0)
+
+
+  for (i in 1:3) {
+    for (j in 1:7) {
+      boxplot.ej(cor.dat[[2]][[i]][[j]], xloc = xloc[j]+2.2*(i-1), 
+                 cex.boxpoint = ps, fill = fill[j])
+    }
+  }
+
+  mtext(expression(bold("Gene")), outer = TRUE, cex = 2.2, at = 0.24)
+  mtext(expression(bold("Cell")), outer = TRUE, cex = 2.2, at = 0.72)
+
+  yadj = 0.10+0.2
+  xadj = 2.70
+  l = seq(from = 0.26, by = -0.03, length.out = 7)
+  r = l + 0.02
+  t = l + 0.01
+  imp_names = c('Observed',"G2S3", "SAVER", "MAGIC", "scImpute", "VIPER", "DCA" )
+
+  for (i in 1:7){
+    rect(5.25+xadj, l[i]+yadj, 5.5+xadj, r[i]+yadj, col = fill[i], lwd = 2)
+    text(5.7+xadj, t[i]+yadj , imp_names[i], cex = 1.6, font = 1, adj = 0)
+  }
+}
+
+#start the plot
+pdf("Plots/Figure1.pdf",22, 10)
+ds.plot()
+dev.off()
+
+
+
+```
+
+
+## Statified COrrelation
+
+```{r}
+dat = readRDS('Data/dat3rds')
+
+# The order of tests: G2S3, SAVER, MAGIC, scImpute, VIPER, DCA
+
+
+non_zero_prop = function(df){apply(df, 1, function(x)sum(x!=0, na.rm = T)/ncol(df))} #percent of expressed 
+
+
+strate = vector("list", 3)
+names(strate) = names(dat)
+
+
+# cutoff
+# cutoff = matrix(c(.2, .5,
+#           .2, .5,
+#           .1, .3), 3,2, byrow = T)
+
+cutoff = matrix(c(.3, .8,
+          .3, .8,
+          .3, .8), 3,2, byrow = T)
+
+for(i in 1:3){
+  non_zero_rate = non_zero_prop(dat[[i]][[2]])
+  print(summary(non_zero_rate))
+  id_low = which(non_zero_rate<=cutoff[i, 1])
+  id_middle = which(non_zero_rate<=cutoff[i, 2]&non_zero_rate>cutoff[i, 1])
+  id_high = which(non_zero_rate>cutoff[i, 2])
+  strate[[i]][[1]] = id_low
+  strate[[i]][[2]] = id_middle
+  strate[[i]][[3]] = id_high
+  names(strate[[i]]) <- c("low", "middle", "high")
+}
+
+
+
+nGene.strat = sapply(strate, function(x) sapply(x, length))
+nGene.per = t(nGene.strat)/apply(nGene.strat, 2, sum)
+
+# percentage of mildly + widely expressed genes
+rownames(nGene.per)[1] = "Reyfman" 
+apply(nGene.per[, 2:3], 1, sum)
+
+
+
+get.cor.gene <- function(X, Y) {
+  sapply(1:nrow(X), function(i) cor(X[i, ], Y[i, ], method = "pearson"))
+}
+
+get.cor.cell <- function(X, Y) {
+  sapply(1:ncol(X), function(i) cor(X[, i], Y[, i], method= "spearman"))
+}
+
+cor.dat.strate <- vector("list", 2)
+names(cor.dat.strate) <- c("gene", "cell")
+
+for (i in 1:2) {
+  cor.dat.strate[[i]] <- vector("list", 3)
+  names(cor.dat.strate[[i]]) <- names(dat)
+  for (j in 1:3) {
+    cor.dat.strate[[i]][[j]] <- vector("list", 7)
+    names(cor.dat.strate[[i]][[j]]) <-  c("Obs", "g2s2", "SAVER", "magic", "scImpute", "viper", "dca")
+    for (k in 1:5){
+      cor.dat.strate[[i]][[j]][[k]]  <- vector('list', 3)
+      names(cor.dat.strate[[i]][[j]][[k]]) = c('low', 'middle', 'high')
+    }
+  }
+}
+
+# The order of tests: G2S3, SAVER, MAGIC, scImpute, VIPER, DCA
+
+for (i in 1:3) {
+  for (j in 1:7) {
+    ind <- c(10, 12, 11, 16, 13:15) #put G2S3 and magic in front
+    for(k in 1:3){
+      imp.norm <- as.matrix(dat[[i]][[ind[j]]][strate[[i]][[k]],])
+      cor.dat.strate[[1]][[i]][[j]][[k]] <- get.cor.gene(dat[[i]][[9]][strate[[i]][[k]],], imp.norm)
+      cor.dat.strate[[2]][[i]][[j]][[k]] <- get.cor.cell(dat[[i]][[9]][strate[[i]][[k]],], imp.norm)
+    }
+    
+  }
+}
+
+saveRDS(cor.dat.strate, file = "Data/cor_dat_strate.rds")
+
+```
+
+##function for Figure S1 (Stratified Plot)
+
+```{r}
+corplot.strat = function(cor.dat, k){
+  Gene_Levels = c("Rarely", "Mildly", "Widely")
+  x <- c(1, 2, 3)
+  par(las = 1)
+  plot(x, c(-5, -5, -5), type = "p", ylab = " ", xlab = " ", cex = 1.5, 
+       ylim = c(0.0, 1), xlim = c(1, 9), lwd = 2, pch = 5, axes = FALSE, main = " ")
+   axis(1, at = c(2.1, 4.6, 7.1), labels = FALSE)
+  text(c(2.1, 4.6, 7.1), par()$usr[3]-0.07,
+       labels = c("Reyfman", "PBMC", "Zeisel"), srt = 45, adj = 1, 
+       xpd = TRUE, cex = 2)
+  axis(2, pos = 1.1)
+
+
+fill <- c("white", "#cb181d", "#6baed6", '#8491B4B2', "#bae4b3", 'orange', "#FFD700")
+
+  xloc <- seq(1.5, by = 0.25, length.out = 7)
+
+
+# Gene-to-Gene plot-------------------------------------------------------
+  for (i in 1:3) {
+    for (j in 1:7) {
+      boxplot.ej(cor.dat[[1]][[i]][[j]][[k]], xloc = xloc[j]+2.2*(i-1), 
+                 cex.boxpoint = ps, fill = fill[j])
+    }
+  }
+
+
+
+  # configure legends
+    yadj = 0.10
+  xadj = 2.30
+  l = seq(from = 0.26, by = -0.03, length.out = 7)
+  r = l + 0.02
+  t = l + 0.01
+
+  yadj = 0.10
+  xadj = 2.80
+  l = seq(from = 0.5, by = -0.1, length.out = 7)
+  r = l + 0.06
+  t = l + 0.03
+  imp_names = c('Observed',"G2S3", "SAVER","MAGIC", "scImpute", "VIPER", "DCA")
+
+
+# Draw Legend 
+  if(k==1){
+  for (i in 1:7){
+    rect(5.25+xadj, l[i]+yadj, 5.5+xadj, r[i]+yadj, col = fill[i], lwd = 2)
+    text(5.7+xadj, t[i]+yadj, imp_names[i], cex = 1.6, font = 1, adj = 0)
+  }
+  }
+  if(k==3){
+  par(las = 0)
+  mtext("Correlation with Reference",side = 2, line = 3, cex = 1.6)}
+
+  if(k==2){
+    par(las = 1)
+     mtext("Gene", side = 3, line = 1, cex = 2,font = 2)
+  }
+
+
+
+  x <- c(1, 2, 3)
+  plot(x, c(-5, -5, -5), type = "p", ylab = " ", xlab = " ", cex = 1.5, 
+       ylim = c(0.0, 1), xlim = c(1, 9), lwd = 2, pch = 5, axes = FALSE, main = " ")
+
+  axis(1, at = c(2.1, 4.6, 7.1), labels = FALSE)
+  text(c(2.1, 4.6, 7.1), par()$usr[3]-0.07,
+       labels = c("Refyman", "PBMC", "Zeisel"), srt = 45, adj = 1, 
+       xpd = TRUE, cex = 2)
+  axis(2, pos = 1.1)
+
+#  Cell-to-Cell plot-----------------------------------------------------
+
+  for (i in 1:3) {
+    for (j in 1:7) {
+      boxplot.ej(cor.dat[[2]][[i]][[j]][[k]], xloc = xloc[j]+2.2*(i-1), 
+                 cex.boxpoint = ps, fill = fill[j])
+    }
+  }
+
+  if(k==3){
+    par(las = 0)
+    # mtext("Gene (Pearson)",side = 2, line = 3, cex = 1.6, font = 2)
+    mtext("Correlation with Reference",side = 2, line = 3, cex = 1.6)}
+
+  if(k==2){
+    par(las = 1)
+     mtext("Cell", side = 3, line = 0, cex = 2,font = 2)
+  }
+
+  par(las = 1)
+  mtext(Gene_Levels[k], side = 1, line = 8.5, cex = 2,font = 2)
+
+}
+
+```
+
+
+##plot figure S1
+
+```{r}
+
+cor.dat.strate = readRDS("Data/cor_dat_strate.rds")
+pdf('Plots/Figure_S1.pdf', 16, 10)
+# pdf('Plots/Figure_S1_quantile.pdf', 16, 10)
+par(mfcol = c(2, 3), cex.main = 1.5, mar = c(8, 1, 1, 1) + 0.1, oma = c(2, 5, 5, 3), 
+    mgp = c(3.5, 1, 0),
+    cex.lab = 1.3, font.lab = 2, cex.axis = 2, bty = "n", las = 1, xpd = NA)
+for (k in 3:1){
+  corplot.strat(cor.dat.strate, k)
+
+}
+dev.off()
+```

@@ -1,0 +1,168 @@
+---
+title: "Result Part 4: Regulatory Network"
+output: html_notebook
+---
+
+
+# Regulatory Netowrk Analysis
+
+- datasets from Paul et al.
+- plot pu.1 and gata1 genes (Anticorrelated Genes)
+- heatmap of all regulartory network
+
+
+##Data Preparation
+
+```{r}
+load('Data/Paul_Cell_MARSseq_GSE72857.RData')
+#find GATA1 gene
+gata1 = 'gata1'
+
+grep(gata1, info.genes, value = T, ignore.case = T)
+
+#find PU.1 gene
+pu.1 <- c('SFPI1', 'SPI-1', 'SPI-A', 'PU.1', 'OFF')
+lapply(pu.1, function(x) grep(x, info.genes, value = T, ignore.case = T))
+#double check existence
+antigenes <- c("Gata1", "Sfpi1")
+lapply(antigenes, function(x)grep(x, info.genes, value = T, ignore.case = T))
+
+gene.names <-sapply(strsplit(rownames(data.debatched), ";"), "[", 1)
+is.informative <- gene.names %in% info.genes[order(info.genes)]
+data.info.genes <- data.debatched[is.informative,]
+rownames(data.info.genes) <- gene.names[is.informative]
+
+dim(data.info.genes)
+quantile.cell <- quantile(colSums(data), 0.2)
+quantile.cell
+
+write.table(data.info.genes, file = 'Data/Paul_infogene.txt', row.names = F, col.names = F, quote = F)
+saveRDS(data.info.genes, file = 'Data/paul.rds')
+
+```
+##Figure 8 (Heatmap + Correlated Pairs)
+- G2S3 imputed on Ruddle
+- DCA imputed on Grace 
+
+```{r}
+#readin Data
+
+paul <- readRDS('Data/paul.rds')
+paul_g2s3 <- read.csv('Data/Paul_g2s3.csv', header = F)
+paul_scimpute = readRDS('Data/Paul_scimpute.rds')
+paul_dca <- read.csv('Data/paul_dca.tsv', sep = '\t')
+paul_magic <- read.csv('Data/Paul_magic.csv');paul_magic = t(paul_magic[,-1])
+dimnames(paul_g2s3) <- dimnames(paul)
+dimnames(paul_scimpute) <- dimnames(paul)
+dimnames(paul_dca) <- dimnames(paul)
+dimnames(paul_magic)  <- dimnames(paul); 
+# paul_dca = as.matrix(paul_dca)
+paul = data.frame(t(paul))
+paul_g2s3 = data.frame(t(paul_g2s3))
+paul_scimpute = data.frame(t(paul_scimpute))
+paul_dca = data.frame(t(paul_dca))
+paul_magic = data.frame(t(paul_magic))
+
+
+
+save(paul, paul_g2s3, paul_scimpute, paul_dca, paul_magic, file = "Data/paul_allMethod.rda")
+```
+
+#plot Figure 5
+
+```{r}
+
+load('Data/paul_allMethod.rda')
+antigenes <- c("Gata1", "Sfpi1")
+cogenes <- c('Gata1', 'Zfpm1')
+
+
+antipairPlot = function(df, title){
+	p = qplot(df[, antigenes[1]], df[, antigenes[2]], xlab = 'Gata1', ylab = 'Sfpi1', alpha=I(0.4)) + theme_bw(base_size = 24)+
+  ggtitle(title) +theme(plot.title = element_text(hjust = 0.5))+theme(plot.title = element_text(hjust = 0.5, size = 24, face = "bold")) + theme(plot.margin = margin(0.5, 2, 1, 2, "cm")) + theme(axis.title.x = element_text(face = 'bold'), axis.title.y = element_text(face = 'bold'), axis.text.y=element_blank(),axis.text.x=element_blank())   + theme(plot.margin = unit(c(0.3,0.5,1,1), "cm"))
+
+  	p  <- p + theme(plot.title = element_blank())
+  return(p)
+}
+
+
+pairPlot = function(df, title){
+	p = qplot(df[, cogenes[1]], df[, cogenes[2]], xlab = 'Gata1', ylab = 'Zfpm1',alpha=I(0.4)) + theme_bw(base_size = 24)+
+  ggtitle(title) +theme(plot.title = element_text(hjust = 0.5))+theme(plot.title = element_text(hjust = 0.5, size = 24, face = "bold")) + theme(plot.margin = margin(0.5, 2, 1, 2, "cm")) + theme(axis.title.x = element_text(face = 'bold'), axis.title.y = element_text(face = 'bold'), axis.text.y=element_blank(),axis.text.x=element_blank()) + theme(plot.margin = unit(c(0.3,0.5,1,1), "cm"))
+  p  <- p +  theme(plot.title = element_blank())
+  return(p)
+}
+
+library(ggplot2)
+p1 = antipairPlot(paul, 'Raw')
+p2 = antipairPlot(paul_g2s3, "G2S3"); 
+p3 = antipairPlot(paul_scimpute, "scImpute");
+p4 =antipairPlot(paul_dca, "DCA"); 
+p5 = antipairPlot(paul_magic, "MAGIC")
+
+p1.1 = pairPlot(paul, 'Raw')
+p2.1 = pairPlot(paul_g2s3, "G2S3"); 
+p3.1 = pairPlot(paul_scimpute, "scImpute");
+p4.1 = pairPlot(paul_dca, "DCA"); 
+p5.1 = pairPlot(paul_magic, "MAGIC"); 
+# Feature plots of regulatory genes
+
+featureGenes = c('Gfi1', 'Fli1', "Cebpa", 'Sfpi1', 'Gata2', 'Egr1', 'Tal1', 'Zfpm1', 'Gata1', 'Klf1')
+library(ggplot2)
+library(reshape2)
+
+heatplot = function(df, title){
+	df_features = df[,featureGenes]
+	cor.raw = cor(df_features)
+	melted_cor.raw  <- melt(cor.raw )
+	p = ggplot(data = melted_cor.raw , aes(x=Var1, y=Var2, fill=value)) + 
+	geom_tile() + scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+	   midpoint = 0, limit = c(-1,1), space = "Lab", 
+	   name="Pearson\nCorrelation", breaks = c(-1, 0, 1))+
+	   theme_bw(base_size = 20) + theme(axis.title.x = element_blank(),
+	          axis.title.y = element_blank()) + ggtitle(title) +theme(plot.title = element_text(hjust = 0.5, size = 24, face = "bold")) + theme(legend.title = element_text(size = 16),axis.text.x = element_text(angle = 90, hjust = 1)) + theme(plot.margin = unit(c(0.3,0.3,1,0.3), "cm"))
+	p = p 
+	return(p)
+}
+
+q1 = heatplot(paul, "Raw") + theme(legend.position = "top")
+q2 = heatplot(paul_g2s3, 'G2S3')+ theme(legend.position = "top")
+q3 = heatplot(paul_scimpute, 'scImpute')+ theme(legend.position = "top")
+q4 = heatplot(paul_dca, 'DCA')+ theme(legend.position = "top")
+q5 = heatplot(paul_magic, 'MAGIC') + theme(legend.position = "top")
+
+
+
+library(gridExtra)
+library(ggpubr)
+#merge plots for paper
+
+library("cowplot")
+
+fig = ggdraw() +
+  draw_plot(q1, x = 0, y = 0.6, width = .2, height = .4) +
+  draw_plot(q2, x = 0.2, y = 0.6, width = .2, height = .4) +
+  draw_plot(q5, x = 0.4, y = 0.6, width = .2, height = .4) +
+  draw_plot(q3, x = 0.6, y = 0.6, width = .2, height = .4) +
+  draw_plot(q4, x = 0.8, y = 0.6, width = .2, height = .4) + 
+
+  draw_plot(p1, x = 0, y = 0.3, width = .2, height = .3) +
+  draw_plot(p2, x = 0.2, y = 0.3, width = .2, height = .3) +
+  draw_plot(p5, x = 0.4, y = 0.3, width = .2, height = .3) +
+  draw_plot(p3, x = 0.6, y = 0.3, width = .2, height = .3) +
+  draw_plot(p4, x = 0.8, y = 0.3, width = .2, height = .3) + 
+
+  draw_plot(p1.1, x = 0, y = 0, width = .2, height = .3) +
+  draw_plot(p2.1, x = 0.2, y = 0, width = .2, height = .3) +
+  draw_plot(p5.1, x = 0.4, y = 0, width = .2, height = .3) +
+  draw_plot(p3.1, x = 0.6, y = 0, width = .2, height = .3) +
+  draw_plot(p4.1, x = 0.8, y = 0, width = .2, height = .3)+
+  theme(
+    plot.margin = margin(12, 12, 12, 12))+
+
+  draw_plot_label(label = c("A", "B", "C"), size = 30,
+                  x = c(0, 0, 0), y = c(1, 0.6, 0.3))
+
+ggsave(fig, file ='Plots/Figure6.pdf',width=30, height=20)
+
+```
