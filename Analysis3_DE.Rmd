@@ -205,7 +205,7 @@ dev.off()
 
 ```
 
-## utilizes function for plotting 
+## utility function for plotting 
 ```{r}
 line2user <- function(line, side) {
   lh <- par('cin')[2] * par('cex') * par('lheight')
