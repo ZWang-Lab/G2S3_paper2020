@@ -1,19 +1,16 @@
 ---
-title: "Result Part2: Cell subtype separation"
+title: "Clustering Analysis"
 output: html_notebook
 ---
 
-* Data downloaded from GEO with `GSE75748`: [click here](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE75748)
-    + 4 files: (cell type, time course)
+* Cell Type Data downloaded from GEO with `GSE75748`: [click here](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE75748)
     + **Cell type**
         - 19 bulk samples, 1018 single cells
         - 7 cell types: H1, H9, EC, NPC, DEC, HFF, TB
-    + **Time course data**
-        - 15 bulk samples, 758 single cells        
-
 * Analysis
-    + PCA plots colored by cell type
-    + heatmap plots of expression level of different cell types
+    + Inter/Intra distance ratio + Silhouette Coefficient based on cell type
+    + UMAP plots colored by cell type
+    + Plots of Marker genes
 
 
 ## Chu Cell Type Dataset Analysis
@@ -37,38 +34,66 @@ save(bulk_ct,bulk_tc, sc_ct, sc_tc,file = 'Data/Chu_fil.RData')
 
 ```
 
-### PCA plots
+### Read in raw and imputed data
+*revision: add sctssr, saucie, alra, knn_smooth*
 ```{r}
-library(tidyverse)
-library(broom)
-library(ggfortify) # for plotting pca
-library(ggsci)
-data = readRDS('Data/Chu_5datalist.rds')
-
-# add MAGIC and DCA
-chu_magic = read.csv('Data/Chu_celltype_magic.csv')
-chu_magic = t(chu_magic[,-1]);dimnames(chu_magic) = dimnames(data[[2]])
-data[[length(data)+1]] = chu_magic; names(data)[length(data)] = "MAGIC"
-
-chu_dca = read.csv("Data/Chu_celltype_dca.tsv", sep = "\t")
-rownames(chu_dca) = chu_dca$X;chu_dca = chu_dca[,-1] # after rounding , PLGLB2 has 0 for all cells, DCA removed this gene
-PLGLB2.idx =  which(rownames(data[[2]])=="PLGLB2")
-chu_dca = rbind(chu_dca[1:(PLGLB2.idx-1),], rep(0, ncol(chu_dca)), chu_dca[PLGLB2.idx,])
-rownames(chu_dca)[PLGLB2.idx] = "PLGLB2"
-# chu_dca = chu_dca[,-1]
-data[[length(data)+1]] = chu_dca; names(data)[length(data)] = "DCA"
-
-saveRDS(data, file = 'Data/Chu_7datalist.rds')
-```
-
-```{r}
+# add sctssr, saucie, knn_smooth, alra,
 data = readRDS("Data/Chu_7datalist.rds")
+sctssr = readRDS('Data/Chu_celltype_sctssr.rds')
+sctssr[1:5, 1:5]
+saucie = read.csv('Data/Chu_celltype_saucie.csv', row.names = 1)
+dim(saucie);saucie[1:5, 1:5]
+alra = readRDS("Data/Chu_celltype_alra.rds")
+dim(alra); alra[1:5, 1:5]
+knnsmooth = read.table("Data/Chu_celltype_knnsmooth.tsv")
+dim(knnsmooth); knnsmooth[1:5, 1:5]
+length(data)
+saver = readRDS("Data/Chu_celltype_saver.rds")$estimate
+dim(saver); saver[1:5, 1:5]
+data[[8]] <- sctssr; 
+data[[9]] <- saucie;
+data[[10]] <- knnsmooth
+data[[11]] <- data.frame(alra)
+data[[12]]  <- data.frame(saver)
+names(data)[8:12] <- c("scTSSR", "SAUCIE", "knn_smoothing", "ALRA", "Saver")
+names(data)
+
+
+#compute Enimpute (saver, scimpute,  dca, magic, alra)
+source("../Downsampling/my_functions.R")
+en_data = data[c(4,6,7,11,12)]
+en_data = lapply(en_data, function(x) {print(dim(x));as.matrix(x)})
+names(en_data)
+start_time <- Sys.time()
+enimpute_res = Enimpute(en_data)
+end_time  <- Sys.time()
+print(end_time - start_time)
+enimpute = enimpute_res$count.EnImpute.exp
+dimnames(enimpute) = dimnames(data[[2]])
+saveRDS(enimpute, file = 'Data/Chu_celltype_enimpute.rds')
+data[[13]] <- enimpute;names(data)[13] <- "EnImpute"
+
 names(data)
 # format the name
-names(data) = c('bulk', 'Raw', "G2S3", "scImpute", "VIPER", "MAGIC", "DCA")
-#reorder the methods: G2S3, SAVER, MAGIC, scImpute, VIPER, DCA
-data = data[c(1:3, 6, 4, 5, 7)]
+names(data)[1:7] = c('bulk', 'Raw', "G2S3", "scImpute", "VIPER", "MAGIC", "DCA")
+#reorder the methods: G2S3, SAVER, MAGIC, scImpute, VIPER, DCA, scTSSR, SAUCIE, knn_smoothing, ALRA, Enimpute
+data = data[c(1:3,12, 6, 4, 5, 7, 8:11, 13)]
+names(data)
+str(data)
+save(data, file = "Data/Chu_final.rda")
 
+```
+
+### Calculate PCAs and generate Marker gene plots
+
+```{r}
+load("Data/Chu_final.rda")
+data = data[c(1, c(1, 2, 3, 10, 4, 5, 6, 11, 8, 7, 9, 12)+1)]
+names(data)
+names(data) <- c("Bulk", "Raw", "G2S3", "SAVER", "kNN-smoothing", "MAGIC", "scImpute", "VIPER", "ALRA", "scTSSR", "DCA", "SAUCIE", "EnImpute")
+
+#remove negative values
+# a = lapply(data, function(x) {x = as.matrix(x);x[which(x<0)]=0; return(x)})
 
 plot_marker = function(sc_ct, method){
 	df = (sc_ct[c("GATA6", "NANOG"),] + 0.1) %>% t() %>% log()%>%data.frame()
@@ -79,8 +104,8 @@ plot_marker = function(sc_ct, method){
 plot_list = lapply(2:length(data), function(i) {plot_marker(data[[i]], names(data)[i])})
 
 library(gridExtra)
-pdf('Plots/Figure_S3.pdf',width=16, height=8)
-do.call("grid.arrange", c(plot_list, ncol=3))
+pdf('Plots/Figure_S4_rev2.pdf',width=20, height=8)
+do.call("grid.arrange", c(plot_list, ncol=4))
 dev.off()
 
 # plot first 1, 3 pcs
@@ -104,30 +129,28 @@ saveRDS(plot_list, file = "Data/pca_plot.rds")
 
 ```
 
-## Plot of Figure 2
+### Generate PCA plots 
+*(previous version)*
 
 ```{r}
 plot_list = readRDS('Data/pca_plot.rds')
 library(gridExtra)
-pdf('Plots/Figure_2.pdf',width=16, height=8)
-do.call("grid.arrange", c(plot_list, ncol=3))
+pdf('Plots/Figure3_rev.pdf',width=20, height=8)
+do.call("grid.arrange", c(plot_list, ncol=4))
 dev.off()
-
 
 ```
 
 
 
-## Plot of Figure 2 (new 03/17/2020)
+
+### Plot of Figure 2 
+*(new 09/17/2020)*
 
 ```{r}
-data = readRDS("Data/Chu_7datalist.rds")
-names(data)
-# format the name
-names(data) = c('bulk', 'raw', "G2S3", "scImpute", "VIPER", "MAGIC", "DCA")
-#reorder the methods: G2S3, SAVER, MAGIC, scImpute, VIPER, DCA
-data = data[c(1:3, 6, 4, 5, 7)]
+data = readRDS("Data/Chu_final.rds")
 
+# use top 50 PCs
 
 library(fpc)
 library(tidyverse)
@@ -136,106 +159,130 @@ calc_10pc = function(sc_ct){
 	sc_ct[sc_ct<0]=0
 	cg.idx = rowSums(sc_ct)>0 # remove genes with all zero reads
 	sc_pca <-(sc_ct[cg.idx,] + 0.1) %>% t() %>% log()%>% scale() %>% prcomp()  
-	sc_pca = data.frame(sc_pca$x[,1:10])
+	sc_pca = data.frame(sc_pca$x[,1:50])
 	sc_pca$celltype = as.factor(substring(colnames(sc_ct),first = 1, last = 2))
 	return(sc_pca)
 }
 
 pcs_list = lapply(2:length(data), function(i) {calc_10pc(data[[i]])})
 names(pcs_list) = names(data)[-1]
-saveRDS(pcs_list, file = "Data/methods_10pcs.rds")
+saveRDS(pcs_list, file = "Data/methods_10pcs_final.rds")
 
-# The plot
+
+pcs_list = readRDS("Data/methods_10pcs_final.rds")
+
+# reorder the methods
+pcs_list = pcs_list[c(1, 2, 3, 10, 4, 5, 6, 11, 8, 7, 9, 12)]
+
+# The plot (calc for top 50 PCs)
+pcs_n = c(1:10, 20, 30, 40, 50)
 calc_DunnIndex <- function(pc_df){
 	dunn =c()
 	intr_inter = c()
 	avg.sil = c()
-	for(i in 1:10){
+	for(i in pcs_n){
 		d = dist(pc_df[,1:i])
-		c = as.integer(pc_df[,11])
+		# c = as.integer(pc_df[,51])
+		celltype = pc_df[,51]
+		levels(celltype)[levels(celltype)%in%c("H1","H9")] <- "UN"
+		c = as.integer(celltype)
 		c.stat = cluster.stats(d, c)
 		dunn = c(dunn, c.stat$dunn)
 		intr_inter = c(intr_inter, c.stat$average.between/c.stat$average.within)
 		avg.sil = c(avg.sil, c.stat$avg.silwidth)
+
 	}
 	return(list(dunn = dunn, intr_inter = intr_inter, avg.sil = avg.sil))
 }
 
 cluster.stats = lapply(pcs_list, function(x) calc_DunnIndex(x))
-saveRDS(cluster.stats, file = "Data/cluster_stats.rds")
+# saveRDS(cluster.stats, file = "Data/cluster_stats_final.rds")
 
-
-
-
-cluster.stats = readRDS("Data/cluster_stats.rds")
-names(cluster.stats)[1] = "Raw"
+# cluster.stats = readRDS("Data/cluster_stats_final.rds")
+names(cluster.stats) = c("Raw", "G2S3", "SAVER", "kNN-smoothing", "MAGIC", "scImpute", "VIPER", "ALRA", "scTSSR", "DCA", "SAUCIE", "EnImpute")
 #plot figures
 library(ggsci)
 library(ggplot2)
 
-gen_cluster_stat_plot = function(measure){
 
+gen_cluster_stat_plot = function(measure){
+	library(reshape2)
 	if(measure == "intr_inter"){yl = "Average Inter/Intra-subtype Distance Ratio"}else{
 		yl = "Silhouette Coefficient"}
 
 	data_list= lapply(cluster.stats, function(x) get(measure, x))
-	df = do.call(cbind, data_list)
-	library(reshape2)
-	df.melt <- melt(df); colnames(df.melt)[1:2]= c("PCs", "Method")
+	df = data.frame(do.call(cbind, data_list))
+	mycolors = c(pal_lancet()(9), pal_nejm()(3))
+	df$PCs = pcs_n
+	df.melt <- melt(df, id.vars = c("PCs"), variable.name = "Method"); 
+	colnames(df.melt)[2] = "Method"
+	library(dplyr)
+	df.melt$Method = revalue(df.melt$Method, c("kNN.smoothing"="kNN-smoothing"))
 	library(ggsci)
 	library(ggplot2)
 	p1 = ggplot(df.melt, aes(x = PCs, y = value, color = Method)) +theme_bw() +
-	geom_line() + ylab(yl) + scale_color_lancet() + xlab("Number of PCs") + scale_x_continuous(breaks=seq(1:10))
+	geom_line() + ylab(yl) +scale_color_manual(values = mycolors) +  xlab("Number of PCs") + scale_x_continuous(breaks=c(seq(1:10), 20, 30, 40, 50))
 	return(p1)
-	# plotname = paste0("./Plots/Cluster_stat_",measure, ".pdf")
-	# ggsave(p1, file = plotname)
 }
 
 f1 = gen_cluster_stat_plot("intr_inter")
 f2 = gen_cluster_stat_plot("avg.sil")
 library(gridExtra)
 fig = grid.arrange(f1, f2)
-ggsave(fig, file = "./Plots/FIgure2.pdf", width = 10)
+ggsave(fig, file = "./Plots/Figure2_rev_merge.pdf", width = 10)
+
 ```
 
 
+### Generate Figure 3 (UMAP)
 
-
-## plot of PC1 vs PC2 (Figure S2); 
+- use R package "umap"
 
 ```{r}
-# plot first 1, 2 pcs
-pcs_list = readRDS("./Data/methods_10pcs.rds")
-names(pcs_list)[1] = "Raw"
-plot_pca = function(sc_pca, method){
+load("Data/Chu_final.rda")
+#reorder data
+data = data[c(1, c(1, 2, 3, 10, 4, 5, 6, 11, 8, 7, 9, 12)+1)]
+names(data)
+names(data) <- c("Bulk", "Raw", "G2S3", "SAVER", "kNN-smoothing", "MAGIC", "scImpute", "VIPER", "ALRA", "scTSSR", "DCA", "SAUCIE", "EnImpute")
+
+library(umap)
+library(tidyverse)
+library(ggfortify) # for plotting pca
+
+library(ggsci)
+
+plot_umap = function(sc_ct, method, numPc){
+	# preprocess data
 	print(method)
-	p = ggplot(sc_pca, aes(x=PC1, y=PC2, color=celltype)) + geom_point()+ scale_color_npg() + theme_bw(base_size = 16) + ggtitle(method) +theme(plot.title = element_text(hjust = 0.5, size = 20, face = "bold"))+ labs(color = "Cell Type")
+	cg = rowSums(sc_ct)
+	sc_ct[sc_ct<0]=0
+	cg.idx = rowSums(sc_ct)>0 # remove genes with all zero reads
+	sc_pca <-(sc_ct[cg.idx,] + 0.1) %>% t() %>% log()%>% scale() %>% prcomp()  
+	# var_comp = cumsum(sc_pca$sdev^2);var_comp = var_comp/c(tail(var_comp,1))
+	pc_sel = numPc
+	sc_pca = data.frame(sc_pca$x[,1:pc_sel])
+	# use umap default 15 neighbors
+	sc_umap <-sc_pca %>% umap()
+	sc_umap.df = data.frame(sc_umap$layout); colnames(sc_umap.df) = paste0("UMAP", c(1,2))
+	sc_umap.df$celltype = as.factor(substring(colnames(sc_ct),first = 1, last = 2))
+	p = ggplot(sc_umap.df, aes(x=UMAP1, y=UMAP2, color=celltype)) + geom_point()+ scale_color_npg() + theme_bw(base_size = 16) + ggtitle(method) +theme(plot.title = element_text(hjust = 0.5, size = 20, face = "bold"))+ labs(color = "Cell Type")
 	return(p)
 }
-
-plot_list = lapply(1:length(pcs_list), function(i) {plot_pca(pcs_list[[i]], names(pcs_list)[i])})
 
 library(gridExtra)
-library(ggsci)
-pdf('Plots/Figure_S2.pdf',width=16, height=8)
-do.call("grid.arrange", c(plot_list, ncol=3))
+
+set.seed(1)
+plot_list= lapply(2:length(data), function(i) {plot_umap(data[[i]], names(data)[i], 3)})
+
+plotname = paste0("Plots/Figure_3_rev.pdf")
+pdf(plotname,width=20, height=10)
+do.call("grid.arrange", c(plot_list, ncol=4))
 dev.off()
-
-plot_pca = function(sc_pca, method){
-	print(method)
-	p = ggplot(sc_pca, aes(x=PC1, y=PC3, color=celltype)) + geom_point()+ scale_color_npg() + theme_bw(base_size = 16) + ggtitle(method) +theme(plot.title = element_text(hjust = 0.5, size = 20, face = "bold"))+ labs(color = "Cell Type")
-	return(p)
-}
-
-plot_list = lapply(1:length(pcs_list), function(i) {plot_pca(pcs_list[[i]], names(pcs_list)[i])})
-pdf('Plots/Figure3.pdf',width=16, height=8)
-do.call("grid.arrange", c(plot_list, ncol=3))
-dev.off()
-
 
 
 
 ```
+
 
 
 
