@@ -6,12 +6,17 @@ output: html_notebook
 
 # Regulatory Netowrk Analysis
 
-- datasets from Paul et al.
-- plot pu.1 and gata1 genes (Anticorrelated Genes)
-- heatmap of all regulartory network
+- datasets:
+  + Paul et al. of Regulatory Genes
+  + Buettner et al. of Cell Cycle Periodic Genes
+- plot correlated/anticorrelated gene pairs in Paul dataset
+- heatmap of all pairwise regulartory gene relationship
+- fraction of buetttner periodic markers in correct direction
 
 
-##Data Preparation
+## Section 1: Paul Data Analysis
+
+### Data Preparation
 
 ```{r}
 load('Data/Paul_Cell_MARSseq_GSE72857.RData')
@@ -40,13 +45,11 @@ write.table(data.info.genes, file = 'Data/Paul_infogene.txt', row.names = F, col
 saveRDS(data.info.genes, file = 'Data/paul.rds')
 
 ```
-##Figure 8 (Heatmap + Correlated Pairs)
-- G2S3 imputed on Ruddle
-- DCA imputed on Grace 
+
+### Read in Data
 
 ```{r}
 #readin Data
-
 paul <- readRDS('Data/paul.rds')
 paul_g2s3 <- read.csv('Data/Paul_g2s3.csv', header = F)
 paul_scimpute = readRDS('Data/Paul_scimpute.rds')
@@ -62,107 +65,274 @@ paul_g2s3 = data.frame(t(paul_g2s3))
 paul_scimpute = data.frame(t(paul_scimpute))
 paul_dca = data.frame(t(paul_dca))
 paul_magic = data.frame(t(paul_magic))
-
-
-
 save(paul, paul_g2s3, paul_scimpute, paul_dca, paul_magic, file = "Data/paul_allMethod.rda")
 ```
 
-#plot Figure 5
+### Generate Figure 6
 
+*revision: add 5 new methods*
 ```{r}
-
+# USE R-3.4.2
 load('Data/paul_allMethod.rda')
-antigenes <- c("Gata1", "Sfpi1")
-cogenes <- c('Gata1', 'Zfpm1')
+library(tidyverse)
+# sctssr <- readRDS("Data/paul_sctssr.rds") %>% t()
+# saucie <- read.csv("Data/paul_saucie.csv", row.names = 1)
+# saveRDS(saucie, file = "Data/paul_saucie.rds")
+saucie <- readRDS("Data/paul_saucie.rds") %>% t()
+saver <- readRDS("Data/Paul_saver.rds")$estimate  %>% t() 
+knnsmooth <- readRDS("Data/paul_knnsmooth.rds")  %>% t()
+alra <- readRDS("Data/paul_alra.rds") %>% t()
+# sctssr removed some gene, use original data to show
+tmp <- readRDS("Data/paul_sctssr.rds")%>%t()
+sctssr = paul; 
+sctssr[, c(colnames(sctssr) %in% colnames(tmp))] %>%dim()
+sctssr[, c(colnames(sctssr) %in% colnames(tmp))] = tmp
+sctssr <- sctssr 
+viper <- readRDS("Data/paul_viper.rds") %>%t()
+saucie <- readRDS("Data/paul_saucie.rds")%>%t()
+
+enimpute <- readRDS("Data/paul_enimpute.rds")
+dimnames(enimpute) <- dimnames(saver)
 
 
-antipairPlot = function(df, title){
-	p = qplot(df[, antigenes[1]], df[, antigenes[2]], xlab = 'Gata1', ylab = 'Sfpi1', alpha=I(0.4)) + theme_bw(base_size = 24)+
-  ggtitle(title) +theme(plot.title = element_text(hjust = 0.5))+theme(plot.title = element_text(hjust = 0.5, size = 24, face = "bold")) + theme(plot.margin = margin(0.5, 2, 1, 2, "cm")) + theme(axis.title.x = element_text(face = 'bold'), axis.title.y = element_text(face = 'bold'), axis.text.y=element_blank(),axis.text.x=element_blank())   + theme(plot.margin = unit(c(0.3,0.5,1,1), "cm"))
-
-  	p  <- p + theme(plot.title = element_blank())
-  return(p)
-}
-
-
-pairPlot = function(df, title){
-	p = qplot(df[, cogenes[1]], df[, cogenes[2]], xlab = 'Gata1', ylab = 'Zfpm1',alpha=I(0.4)) + theme_bw(base_size = 24)+
-  ggtitle(title) +theme(plot.title = element_text(hjust = 0.5))+theme(plot.title = element_text(hjust = 0.5, size = 24, face = "bold")) + theme(plot.margin = margin(0.5, 2, 1, 2, "cm")) + theme(axis.title.x = element_text(face = 'bold'), axis.title.y = element_text(face = 'bold'), axis.text.y=element_blank(),axis.text.x=element_blank()) + theme(plot.margin = unit(c(0.3,0.5,1,1), "cm"))
-  p  <- p +  theme(plot.title = element_blank())
-  return(p)
-}
-
-library(ggplot2)
-p1 = antipairPlot(paul, 'Raw')
-p2 = antipairPlot(paul_g2s3, "G2S3"); 
-p3 = antipairPlot(paul_scimpute, "scImpute");
-p4 =antipairPlot(paul_dca, "DCA"); 
-p5 = antipairPlot(paul_magic, "MAGIC")
-
-p1.1 = pairPlot(paul, 'Raw')
-p2.1 = pairPlot(paul_g2s3, "G2S3"); 
-p3.1 = pairPlot(paul_scimpute, "scImpute");
-p4.1 = pairPlot(paul_dca, "DCA"); 
-p5.1 = pairPlot(paul_magic, "MAGIC"); 
-# Feature plots of regulatory genes
+# order of methods:  G2S3, SAVER, kNN-smoothing, MAGIC, scImpute, VIPER, ALRA, scTSSR, DCA, SAUCIE, EnImpute
+paul_list <- list(paul, paul_g2s3, saver, knnsmooth, paul_magic, paul_scimpute, viper, alra, sctssr, paul_dca, saucie, enimpute)
+names(paul_list) <- c("Raw", "G2S3", "SAVER", "kNN-smoothing", "MAGIC", "scImpute", "VIPER", "ALRA", "scTSSR", "DCA", "SAUCIE", "EnImpute")
 
 featureGenes = c('Gfi1', 'Fli1', "Cebpa", 'Sfpi1', 'Gata2', 'Egr1', 'Tal1', 'Zfpm1', 'Gata1', 'Klf1')
 library(ggplot2)
-library(reshape2)
+library(gridExtra)
 
 heatplot = function(df, title){
-	df_features = df[,featureGenes]
-	cor.raw = cor(df_features)
-	melted_cor.raw  <- melt(cor.raw )
-	p = ggplot(data = melted_cor.raw , aes(x=Var1, y=Var2, fill=value)) + 
-	geom_tile() + scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
-	   midpoint = 0, limit = c(-1,1), space = "Lab", 
-	   name="Pearson\nCorrelation", breaks = c(-1, 0, 1))+
-	   theme_bw(base_size = 20) + theme(axis.title.x = element_blank(),
-	          axis.title.y = element_blank()) + ggtitle(title) +theme(plot.title = element_text(hjust = 0.5, size = 24, face = "bold")) + theme(legend.title = element_text(size = 16),axis.text.x = element_text(angle = 90, hjust = 1)) + theme(plot.margin = unit(c(0.3,0.3,1,0.3), "cm"))
-	p = p 
-	return(p)
+  library(reshape2)
+  df_features = df[,featureGenes]
+  cor.raw = cor(df_features)
+  melted_cor.raw  <- melt(cor.raw )
+  p = ggplot(data = melted_cor.raw , aes(x=Var1, y=Var2, fill=value)) + 
+  geom_tile() + scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+     midpoint = 0, limit = c(-1,1), space = "Lab", 
+     name="Pearson\nCorrelation", breaks = c(-1, 0, 1))+
+     theme_bw(base_size = 20) + theme(axis.title.x = element_blank(),
+            axis.title.y = element_blank()) + ggtitle(title) +theme(plot.title = element_text(hjust = 0.5, size = 24, face = "bold")) + theme(legend.title = element_text(size = 16),axis.text.x = element_text(angle = 90, hjust = 1)) + theme(plot.margin = unit(c(0.3,0.3,1,0.3), "cm"))
+  p = p + theme(legend.position = "top")
+  return(p)
 }
 
-q1 = heatplot(paul, "Raw") + theme(legend.position = "top")
-q2 = heatplot(paul_g2s3, 'G2S3')+ theme(legend.position = "top")
-q3 = heatplot(paul_scimpute, 'scImpute')+ theme(legend.position = "top")
-q4 = heatplot(paul_dca, 'DCA')+ theme(legend.position = "top")
-q5 = heatplot(paul_magic, 'MAGIC') + theme(legend.position = "top")
+heatplots <- lapply(seq_along(paul_list), function(i) {print(i);heatplot(paul_list[[i]], names(paul_list)[i])})
 
+pdf('Plots/Figure6_rev2.pdf',width=30, height=15)
+do.call("grid.arrange", c(heatplots, ncol=6))
+dev.off()
+```
 
+### Generate Figure S5 and S6
+*(Anti and Cor pair genes, all)*
+```{r}
 
-library(gridExtra)
 library(ggpubr)
-#merge plots for paper
 
-library("cowplot")
+# Figure 6 appendix
 
-fig = ggdraw() +
-  draw_plot(q1, x = 0, y = 0.6, width = .2, height = .4) +
-  draw_plot(q2, x = 0.2, y = 0.6, width = .2, height = .4) +
-  draw_plot(q5, x = 0.4, y = 0.6, width = .2, height = .4) +
-  draw_plot(q3, x = 0.6, y = 0.6, width = .2, height = .4) +
-  draw_plot(q4, x = 0.8, y = 0.6, width = .2, height = .4) + 
+antipair = list(c('Fli1', 'Klf1'), c('Egr1', 'Gfi1'), c('Cebpa','Gata1'), c('Sfpi1','Gata1' ))
+copair = list(c('Sfpi1', "Cebpa"), c("Zfpm1", 'Gata1'), c('Klf1','Gata1' ))
+antipairPlot = function(df, title, antigenes, col){
+  ce <- cor(df[, antigenes[1]], df[, antigenes[2]])
+  p = qplot(df[, antigenes[1]], df[, antigenes[2]], xlab = antigenes[1], ylab = antigenes[2], alpha=I(0.4), colour = I(col)) + theme_bw(base_size = 24)+
+  ggtitle(paste0(title, '\n', "Cor: ", round(ce,2))) +theme(plot.title = element_text(hjust = 0.5))+theme(plot.title = element_text(hjust = 0.5, size = 20, face = "bold")) + theme(plot.margin = margin(0.5, 2, 1, 2, "cm")) + theme(axis.title.x = element_text(face = 'bold'), axis.title.y = element_text(face = 'bold'), axis.text.y=element_blank(),axis.text.x=element_blank())   + theme(plot.margin = unit(c(0.3,0.5,1,1), "cm"))
+  return(p)
+}
 
-  draw_plot(p1, x = 0, y = 0.3, width = .2, height = .3) +
-  draw_plot(p2, x = 0.2, y = 0.3, width = .2, height = .3) +
-  draw_plot(p5, x = 0.4, y = 0.3, width = .2, height = .3) +
-  draw_plot(p3, x = 0.6, y = 0.3, width = .2, height = .3) +
-  draw_plot(p4, x = 0.8, y = 0.3, width = .2, height = .3) + 
 
-  draw_plot(p1.1, x = 0, y = 0, width = .2, height = .3) +
-  draw_plot(p2.1, x = 0.2, y = 0, width = .2, height = .3) +
-  draw_plot(p5.1, x = 0.4, y = 0, width = .2, height = .3) +
-  draw_plot(p3.1, x = 0.6, y = 0, width = .2, height = .3) +
-  draw_plot(p4.1, x = 0.8, y = 0, width = .2, height = .3)+
-  theme(
-    plot.margin = margin(12, 12, 12, 12))+
+pairPlot = function(df, title, cogenes, col){
+  ce <- cor(df[, antigenes[1]], df[, antigenes[2]])
+  p = qplot(df[, cogenes[1]], df[, cogenes[2]], xlab = cogene[1], ylab = cogene[2],alpha=I(0.4), colour = I(col)) + theme_bw(base_size = 24)+
+  ggtitle(paste0(title, '\n', "Cor: ", round(ce,2))) +theme(plot.title = element_text(hjust = 0.5))+theme(plot.title = element_text(hjust = 0.5, size = 20, face = "bold")) + theme(plot.margin = margin(0.5, 2, 1, 2, "cm")) + theme(axis.title.x = element_text(face = 'bold'), axis.title.y = element_text(face = 'bold'), axis.text.y=element_blank(),axis.text.x=element_blank()) + theme(plot.margin = unit(c(0.3,0.5,1,1), "cm"))
+  return(p)
+}
 
-  draw_plot_label(label = c("A", "B", "C"), size = 30,
-                  x = c(0, 0, 0), y = c(1, 0.6, 0.3))
+mycolors = ggsci::pal_lancet()(9)
 
-ggsave(fig, file ='Plots/Figure6.pdf',width=30, height=20)
+antiplots_1  <- lapply(seq_along(paul_list), function(i) antipairPlot(paul_list[[i]], names(paul_list)[i], antipair[[1]], mycolors[1]))
+antiplots_2  <- lapply(seq_along(paul_list), function(i) antipairPlot(paul_list[[i]], names(paul_list)[i], antipair[[2]], mycolors[2]))
+antiplots_3  <- lapply(seq_along(paul_list), function(i) antipairPlot(paul_list[[i]], names(paul_list)[i], antipair[[3]],mycolors[3]))
+antiplots_4  <- lapply(seq_along(paul_list), function(i) antipairPlot(paul_list[[i]], names(paul_list)[i], antipair[[4]],mycolors[4]))
+
+coplots_1  <- lapply(seq_along(paul_list), function(i) antipairPlot(paul_list[[i]], names(paul_list)[i], copair[[1]],mycolors[5]))
+coplots_2  <- lapply(seq_along(paul_list), function(i) antipairPlot(paul_list[[i]], names(paul_list)[i], copair[[2]],mycolors[6]))
+coplots_3  <- lapply(seq_along(paul_list), function(i) antipairPlot(paul_list[[i]], names(paul_list)[i], copair[[3]],mycolors[7]))
+
+library(grid)
+pdf('Plots/FigureS5_antipair.pdf',width=40, height=15)
+do.call("grid.arrange", c(c(antiplots_1, antiplots_2, antiplots_3, antiplots_4), ncol=12))
+dev.off()
+
+pdf('Plots/FigureS6_copair.pdf',width=40, height=10)
+do.call("grid.arrange", c(c(coplots_1, coplots_2, coplots_3), ncol=12))
+dev.off()
+
+```
+
+
+## Section 2: Buettner Data Analysis
+### Data preparation
+
+```{r}
+# read in gene annotation information
+library("readxl")
+library(tidyverse)
+library(janitor)
+markers  <- read_excel('Data/41422_2016_BFcr201684_MOESM26_ESM.xlsx', skip = 4)%>% select(1:5)%>%clean_names() %>% filter(core_67=="YES") %>% data.frame()
+head(markers)
+table(markers$stage)
+saveRDS(markers, file = "Data/core67.rds")
+
+# read in Buettner data
+bd = list.files("../../Raw_data/Bruettner/E-MTAB-2805.processed.1", full.names = T)
+bd.names  <- list.files("../../Raw_data/Bruettner/E-MTAB-2805.processed.1")
+
+bd.dat  <- list('vector', 3)
+for(i in 1:length(bd)){
+  bd.dat[[i]] <- read.table(bd[i], header = T)%>%mutate(AssociatedGeneName = str_to_upper(AssociatedGeneName))%>%data.frame()
+}
+names(bd.dat) <- sapply(strsplit(bd.names, "_"), '[', 1)
+
+head(bd.dat[[1]])
+
+sum(markers$gene_name %in% bd.dat[[1]]$AssociatedGeneName)
+lapply(bd.dat, dim)
+
+saveRDS(bd.dat, file = "Data/Buettner.rds")
+
+b  <- readRDS("Data/Buettner.rds")
+b.i  <- lapply(b, function(x) {
+  # remove unannotated genes
+  idx = which(is.na(x$AssociatedGeneName))
+  x = x[-idx,]
+  res <- x[,5:ncol(x)]
+  udx <- !duplicated(x$AssociatedGeneName)
+  res <- res[udx,]; rownames(res) <- x[udx,"AssociatedGeneName"]
+  return(res)}
+  )
+bue <- do.call(cbind, b.i) %>% data.frame
+
+sum(markers$gene_name %in% rownames(bue))
+
+
+bue[1:5, 1:5]
+#basic filtering
+summarize <- function(df){
+  zero_prop = apply(df, 1, function(x)sum(x==0, na.rm = T))/ncol(df)
+  cat("* summary of zero proportion\n")
+  print(summary(zero_prop))
+  lib_size = apply(df,2, function(x)sum(x, na.rm = T))
+  cat("* summary of library size\n")
+  print(summary(lib_size))
+  return(list(zero_prop = zero_prop,lib_size = lib_size))
+}
+summary.list = summarize(as.matrix(bue))
+gene.fil <- summary.list$zero_prop<0.80
+bue <- bue[gene.fil,]
+
+sum(markers$gene_name %in% rownames(bue))
+saveRDS(bue, file = "Data/bue_dat.rds")
+write.csv(bue, file = "Data/bue_dat.csv")
+write.table(bue, file = "Data/bue_dat.tsv", sep = "\t")
+
+```
+
+### Generate Table 2
+```{r}
+
+raw <- readRDS("Data/bue_dat.rds")
+knnsmooth <- readRDS("Data/bue_dat_knnsmooth.rds")
+magic <- readRDS("Data/bue_dat_magic.rds")
+dca <- readRDS("Data/bue_dat_dca.rds")
+g2s3 <- readRDS("Data/bue_dat_g2s3.rds")
+saver <- readRDS("Data/bue_dat_saver.rds")$estimate
+scimpute <- readRDS("Data/bue_dat_scimpute.rds")
+alra <- readRDS("Data/bue_dat_alra.rds")
+sctssr <- readRDS("Data/bue_dat_sctssr.rds")
+saucie <- readRDS("Data/bue_dat_saucie.rds")
+viper <- readRDS("Data/bue_dat_viper.rds")
+enimpute <- readRDS("Data/bue_dat_enimpute.rds")
+
+info <- readRDS("Data/core67.rds")
+table(info$stage)
+st <- c('G1-S', 'G2-M')
+info <- info[which(info$gene_name %in% rownames(raw)),]
+
+
+calc.cor <- function(x, p = p){
+  x[x<0]=0
+  x = log10(x+0.001)
+  cellstage = grep(p, colnames(x))
+
+  x.1 <- x[match(info[which(info$stage=="G1-S"), 'gene_name'], rownames(x)),cellstage]
+  x.2 <- x[match(info[which(info$stage=="G2-M"), 'gene_name'], rownames(x)),cellstage]
+
+  if (p == "G1|S"){
+    cors = cor(t(x.1), t(x.1))
+  }else{
+    cors = cor(t(x.2), t(x.2))
+  }
+  cors = c(cors[lower.tri(cors)])
+  pos.cor <- median(cors)
+  pos.prop <- sum(cors > 0)/length(cors)
+
+  anti.cors <- cor(t(x.1), t(x.2))
+  anti.cors  <- c(anti.cors[lower.tri(anti.cors)])
+  neg.cor = median(anti.cors)
+  neg.prop <- sum(anti.cors < 0)/length(anti.cors)
+
+  return(list(pos.prop= pos.prop, neg.prop = neg.prop))
+}
+
+
+calc.cor2 <- function(x){
+  x[x<0]=0
+  x = log10(x+0.001)
+
+  x.1 <- x[match(info[which(info$stage=="G1-S"), 'gene_name'], rownames(x)),]
+  x.2 <- x[match(info[which(info$stage=="G2-M"), 'gene_name'], rownames(x)),]
+
+  cors1 = cor(t(x.1), t(x.1))
+  cors2 = cor(t(x.2), t(x.2))
+
+  cors1 = c(cors1[lower.tri(cors1)])
+  cors2 = c(cors2[lower.tri(cors2)])
+  cors = c(cors1, cors2)
+  pos.prop <- sum(cors > 0)/length(cors)
+
+  anti.cors <- cor(t(x.1), t(x.2))
+  anti.cors  <- c(anti.cors)
+  neg.prop <- sum(anti.cors < 0)/length(anti.cors)
+  return(list(pos.prop= pos.prop, neg.prop = neg.prop))
+}
+
+data.list = list(raw = raw, g2s3 = g2s3,saver  =saver, knnsmooth = knnsmooth, magic = magic,scimpute = scimpute, viper = viper, alra = alra, sctssr = sctssr, dca = dca, saucie = saucie, enimpute = enimpute)
+names(data.list) <- c("Raw", "G2S3", "SAVER", "kNN-smoothing", "MAGIC", "scImpute", "VIPER", "ALRA", "scTSSR", "DCA", "SAUCIE", "EnImpute")
+
+library(plyr)
+
+res.list = lapply(data.list, function(x) calc.cor(x,"G1|S"))
+dfs <- lapply(res.list , data.frame, stringsAsFactors = FALSE)
+library(plyr)
+r1<- rbind.fill(dfs); rownames(r1) <- names(data.list)
+r1
+
+cellstage <- grep("G2M", colnames(raw))
+res.list = lapply(data.list, function(x) calc.cor(x,"G2M" ))
+dfs <- lapply(res.list , data.frame, stringsAsFactors = FALSE)
+r2<- rbind.fill(dfs); rownames(r2) <- names(data.list)
+r2
+
+res.list <- lapply(data.list, function(x) calc.cor2(x))
+dfs <- lapply(res.list , data.frame, stringsAsFactors = FALSE)
+r<- rbind.fill(dfs); rownames(r) <- names(data.list)
+r
+
+res.table = cbind(r1, r2)
+rownames(res.table)  <- names(res.list)
+write.csv(r, file = "Bue_results_rev.csv")
 
 ```
