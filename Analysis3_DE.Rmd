@@ -1,19 +1,21 @@
 ---
 title: 'Result Part 3: Differential Expression Analysis'
-output:
-  html_document:
-    df_print: paged
+output: html_notebook
 ---
 
-# Regulatory Netowrk Analysis
+# Differential Gene Analysis
 
-- datasets from Segerstolpe et al., RPKM data, 4 T2D patients and 3 healthy donors
-- use DE (t-test, Wilcoxon test) on Bulk RNA-seq as ground truth
-- plot AUC of DE (t-test, wilcox) on scRNA-seq against ground truth
+- datasets from 
+  + Segerstolpe et al., RPKM data, 4 T2D patients and 3 healthy donors
+  + Chu celltype dataset comparing H1 and DE cells
+- use DE (t-test) on Bulk RNA-seq as ground truth
+- plot AUC of DE (t-test, Wilcox) on scRNA-seq against ground truth
 - DE analysis performed using Seurat 3.0
 
 
-## Raw data preprocessing
+##1. Segersope DE analysis
+
+### Raw data preprocessing
  - filter out genes w. zero proportion > 80% 
 
 ```{r}
@@ -35,55 +37,53 @@ raw.rpkm.fil <- raw.rpkm[gene.fil,]
 save(raw.rpkm.fil, file ='Data/T2D_raw_fil.rda' )
 ```
 
-## Preprocess imputed datatypes
 
-```{r}
-# 
-# g2s3
-raw.rpkm.g2s3 <- read.csv('Data/seger_raw_rpkm_g2s3.csv', header = F)
-dimnames(raw.rpkm.g2s3) = dimnames(raw.rpkm.scimpute)
-saveRDS(raw.rpkm.g2s3, file = "Data/seger_raw_rpkm_g2s3.rds")
-# dca
-raw.rpkm.dca = read.table('Data/Seger_dca.tsv', sep = '\t')[-1,]
-dimnames(raw.rpkm.dca) = dimnames(raw.rpkm.scimpute)
-saveRDS(raw.rpkm.dca, file = "Data/seger_raw_rpkm_dca.rds")
-# magic
-raw.rpkm.magic = read.csv("Data/T2D_magic.csv") #cell by gene (need transpose)
-raw.rpkm.magic = t(raw.rpkm.magic)[-1,]
-dimnames(raw.rpkm.magic) = dimnames(raw.rpkm.fil)
-saveRDS(raw.rpkm.magic, file = "Data/seger_raw_rpkm_magic.rds")
-# saver
-raw.rpkm.saver <- readRDS('Data/T2D_raw_fil_saver.rds')$estimate
-
-```
-
-
-## Read in imputed datasets
+### Read in imputed datasets
 ```{r}
 load("Data/T2D.rda")
+load('Data/T2D_raw_fil.rda')
 raw.rpkm.scimpute  <- readRDS('Data/seger_raw_rpkm_scimpute.rds')
 raw.rpkm.g2s3  <- readRDS("Data/seger_raw_rpkm_g2s3.rds")
 raw.rpkm.dca = readRDS("Data/seger_raw_rpkm_dca.rds")
 raw.rpkm.saver = readRDS('Data/T2D_raw_fil_saver.rds')$estimate
 raw.rpkm.magic = readRDS('Data/seger_raw_rpkm_magic.rds')
 
+#add new methods
+raw.rpkm.sctssr = readRDS("Data/seger_raw_rpkm_sctssr.rds")
+raw.rpkm.alra = readRDS("Data/seger_raw_rpkm_alra.rds")
+raw.rpkm.knnsmooth = readRDS("Data/seger_raw_rpkm_knnsmooth.rds")
+raw.rpkm.saucie = readRDS("Data/seger_raw_rpkm_saucie.rds")
+raw.rpkm.enimpute = readRDS("Data/seger_raw_rpkm_enimpute.rds")
+dimnames(raw.rpkm.enimpute)=dimnames(raw.rpkm.alra)
+
+
 #select 7 subjects w. both bulk and scRNA
 subjectID <- unlist(lapply(strsplit(colnames(bulk.rpkm)[-1], "_"), "[[", 1))
 sc_col.sel <- grepl(paste(subjectID, collapse="|"), colnames(raw.rpkm.scimpute))
-sc.list = list(bulk = bulk.rpkm[rownames(raw.rpkm.fil),-1], raw = raw.rpkm.fil[,sc_col.sel],g2s3 = raw.rpkm.g2s3[,sc_col.sel], scimpute = raw.rpkm.scimpute[,sc_col.sel], saver = raw.rpkm.saver[, sc_col.sel], dca = raw.rpkm.dca[, sc_col.sel], magic = raw.rpkm.magic[, sc_col.sel])
+sc.list = list(bulk = bulk.rpkm[rownames(raw.rpkm.fil),-1], 
+			raw = raw.rpkm.fil[,sc_col.sel],
+			g2s3 = raw.rpkm.g2s3[,sc_col.sel], 
+			scimpute = raw.rpkm.scimpute[,sc_col.sel], 
+			saver = raw.rpkm.saver[, sc_col.sel], 
+			dca = raw.rpkm.dca[, sc_col.sel], 
+			magic = raw.rpkm.magic[, sc_col.sel],
+			sctssr = raw.rpkm.sctssr[, sc_col.sel],
+			# saucie = raw.rpkm.saucie[, sc_col.sel],
+			knnsmooth = raw.rpkm.knnsmooth[, sc_col.sel],	
+			alra = raw.rpkm.alra[, sc_col.sel],
+			enimpute = raw.rpkm.enimpute[, sc_col.sel])
 
 lapply(sc.list, function(x) head(colnames(x)))
 lapply(sc.list, function(x) head(rownames(x)))
-save(sc.list, file = "Data/DE_rpkm_list_NEW.rda")
+save(sc.list, file = "Data/DE_rpkm_list_final.rda")
 ```
 
-## DE analysis 
+### DE analysis 
 ```{r}
-# load('Data/DE_rpkm_list.rda')
-load('Data/DE_rpkm_list_NEW.rda')
-
+load("Data/DE_rpkm_list_final.rda")
 
 library(Seurat)
+# DE test with t-test on bulk
 DE_test <- function(x, de_method){
 
 	df <- CreateSeuratObject(counts = x)
@@ -100,43 +100,70 @@ DE_test <- function(x, de_method){
 
 }
 
+library(DESeq2)
+# de test with DESeq2 on bulk
+DE_test2 <- function(x, de_method){
+	# use DESeq2 for bulk 
+	x = round(x)
+	df <- CreateSeuratObject(counts = x)
+	stim <- rep("ctrl", ncol(df)); stim[grep("T2D", colnames(df))] <- "stim"
+	df$stim <- stim
+	df <- subset(df, subset=nFeature_RNA>500)
+	df <- FindVariableFeatures(df, selection.method = "vst", nfeatures = 5000)
+	df <- NormalizeData(df, normalization.method = "LogNormalize", scale.factor = 10000)
+	Idents(df) <- "stim"
+	if (ncol(df)<10) de_method = 'DESeq2'
+	de.markers <- FindMarkers(df,ident.1 = "stim", ident.2 = "ctrl", test.use = de_method) 
+	# FindMarkers(df,ident.1 = "stim", ident.2 = "ctrl", test.use = de_method) 
+	return(de.markers)
+}
+
+
 ex_level = apply(sc.list[[2]], 1, function(x) sum(x!=0, na.rm = T))/ncol(sc.list[[2]])
 high = (ex_level>0.3); low = (ex_level <=0.3); 
 sum(high); sum(low)
 
+# Formalize the name
 names(sc.list)
-names(sc.list) = c('bulk', "raw", "G2S3", "scImpute", "SAVER", "DCA", "MAGIC")
+
+# reorder the methods
+# c("Raw", "G2S3", "SAVER", "kNN-smoothing", "MAGIC", "scImpute", "VIPER", "ALRA", "scTSSR", "DCA", "SAUCIE", "EnImpute")
+sc.list  <- sc.list[c(1, 2, 3, 5, 9, 7, 4, 10, 8, 6, 11)]
+names(sc.list)
+
+names(sc.list) = c("Bulk", "Raw", "G2S3", "SAVER", "kNN-smoothing", "MAGIC", "scImpute", "ALRA", "scTSSR", "DCA", "EnImpute")
 #high
 sc.list.high = lapply(sc.list, function(x)x[which(high),])
 de.ttest.high <- lapply(sc.list.high, function(x) DE_test(x, 't'))
 de.wilcox.high <- lapply(sc.list.high, function(x) DE_test(x, 'wilcox'))
-#low
+#low (magic removed (No features pass logfc.threshold threshold))
 sc.list.low = lapply(sc.list, function(x)x[which(low),])
-de.ttest.low <- lapply(sc.list.low[1:6], function(x) DE_test(x, 't'))
-de.wilcox.low <- lapply(sc.list.low[1:6], function(x) DE_test(x, 'wilcox'))
+sc.list.low[[6]] = NULL
+names(sc.list.low)
+de.ttest.low <- lapply(sc.list.low, function(x) DE_test(x, 't'))
+de.wilcox.low <- lapply(sc.list.low, function(x) DE_test(x, 'wilcox'))
  
+de.ttest.all <- lapply(sc.list, function(x) DE_test(x, 't'))
+de.wilcox.all <- lapply(sc.list, function(x) DE_test(x, 'wilcox'))
 
-save(de.ttest.high, de.ttest.low, de.wilcox.high, de.wilcox.low, file = "Data/de_results.rda") 
+# rpkm data (need round the number to get integers)
+de.ttest.deseq <- lapply(sc.list, function(x) DE_test2(x, 't'))
+de.wilcox.deseq <- lapply(sc.list, function(x) DE_test2(x,'wilcox'))
+
+
+save(de.ttest.high, de.ttest.low, de.wilcox.high, de.wilcox.low, de.ttest.all, de.wilcox.all,de.ttest.deseq,de.wilcox.deseq ,file = "Data/de_results_final.rda") 
 
 ```
-## Figure 4 plot
+
+### Generate Overall DE plot in Segerstolpe dataset
 
 ```{r}
-
 calc_auc = function(data,  label){
 	library(ROCR)
 	library(tidyverse)
-	colors = c('black', "#C62F4B", "#09557F", "#FF8000", "#00A378", 'cyan3' )
+	colors = c("black", "#cb181d", "#6baed6", '#8491B4B2', "#bae4b3", 'orange', "#FFD700", '#3399FF', "#66CC99", '#D55E00', '#7570b3')
 
-	# change order of data
-	if(length(data)==7){
-		idx = c(1, 2, 3, 5, 7, 4, 6)
-
-	}else{
-		idx = c(1, 2, 3, 5, 4, 6)
-	}
-	data = data[idx]
-	colors = colors[(idx-1)[-1]]
+	if (length(data)==10) colors = colors[-7]
 
 	methods = names(data) 
 	pred_all  <- lapply(data[2:length(methods)], function(x){
@@ -152,70 +179,178 @@ calc_auc = function(data,  label){
 	perf_all <- lapply(pred_all, function(x) performance(x, "tpr","fpr"))
 	AUCs = unlist(unlist(auc_all)%>%lapply("slot", 'y.values'))			
 
-	# ltys = c(4, 1, 4,4,4)
-	# pdf(paste0('Plots/AUC_plot_', label, '.pdf'), width = 8, height = 8)
 	for(i in 1:length(perf_all)){
 	  par.add = (i!=1)
 	  par(cex.axis=1.4, cex = 1.4, cex.lab = 1.4, lwd = 3, cex.main = 2)
 	  plot(perf_all[[i]], col=colors[i] , add = par.add, main = "",lwd = 4, xlab = "False Positive Rate", ylab = "True Positive Rate")
-	  # print(paste(names(perf_all)[[i]], round(as.numeric(auc_all[[i]]@y.values),2)))
 	  print(paste(names(perf_all)[[i]], round(AUCs[i],2)))
 	}
 
-	# change order of methods in legends
-	legend(0.6, 0.35, legend=paste(methods[-1],round(AUCs,2), sep = ": "),
+	legend(0.57, 0.45, legend=paste(methods[-1],round(AUCs,2), sep = ": "),
        col=colors, lty = 1, cex=1)
 	abline(a = 0, b = 1)
-	# dev.off()
 
 }
-load('Data/de_results.rda')
 
-names(de.ttest.high)[2]  <- names(de.ttest.low)[2] <- names(de.wilcox.high)[2] <- names(de.wilcox.low)[2]  <- "Raw"
 
-pdf('Plots/Figure5.pdf',width=20, height=20)
-par(mfrow = c(2,2), oma = c(2, 2, 2, 2))
+pdf('Plots/Figure_response_overall.pdf',width=22, height=11)
+par(mfrow = c(1,2), oma = c(2, 2, 2, 2))
+calc_auc(de.ttest.all, '')
+text(0.5, 
+     line2user(line=3, side=3), 'T-test', xpd=NA, cex=2, font=2)
+calc_auc(de.wilcox.all, '')
+text(0.5, 
+     line2user(line=3, side=3), 'Wilcoxon Test', xpd=NA, cex=2, font=2)
+dev.off()
+
+
+pdf('Plots/Figure_response_deseq.pdf',width=22, height=11)
+par(mfrow = c(1,2), oma = c(2, 2, 2, 2))
+calc_auc(de.ttest.deseq, '')
+text(0.5, 
+     line2user(line=3, side=3), 'T-test', xpd=NA, cex=2, font=2)
+calc_auc(de.wilcox.deseq, '')
+text(0.5, 
+     line2user(line=3, side=3), 'Wilcoxon Test', xpd=NA, cex=2, font=2)
+dev.off()
+
+```
+
+
+
+##2. Chu's datasets
+
+### DE analysis
+```{r}
+load("../Clustering/Data/Chu_final.rda")
+data_all = data[c(1, c(1, 2, 3, 10, 4, 5, 6, 11, 8, 7, 9, 12)+1)]
+names(data)
+names(data) <- c("Bulk", "Raw", "G2S3", "SAVER", "kNN-smoothing", "MAGIC", "scImpute", "VIPER", "ALRA", "scTSSR", "DCA", "SAUCIE", "EnImpute")
+
+library(Seurat)
+
+# H1 vs DEC
+data = lapply(data_all, function(x) {x = x[,grep("H1_|DEC_", colnames(x))]; return(x)})
+
+DE_test.chu <- function(x, de_method){
+
+	df <- CreateSeuratObject(counts = x)
+	stim <- rep("ctrl", ncol(df)); stim[grep("DEC_", colnames(df))] <- "stim"
+	df$stim <- stim
+	df <- subset(df, subset=nFeature_RNA>500)
+	df <- FindVariableFeatures(df, selection.method = "vst", nfeatures = 5000)
+	df <- NormalizeData(df, normalization.method = "LogNormalize", scale.factor = 10000)
+	Idents(df) <- "stim"
+	if (ncol(df)<100) de_method = 't' # always use t-test for bulk
+	de.markers <- FindMarkers(df,ident.1 = "stim", ident.2 = "ctrl", test.use = de_method,min.cells.group = 1) 
+	return(de.markers)
+}
+
+DE_test.all <- function(x, de_method){
+
+	df <- CreateSeuratObject(counts = x)
+	stim <- sapply(strsplit(colnames(x), "_"), "[", 1)
+	df$stim <- stim
+	df <- subset(df, subset=nFeature_RNA>500)
+	df <- FindVariableFeatures(df, selection.method = "vst", nfeatures = 5000)
+	df <- NormalizeData(df, normalization.method = "LogNormalize", scale.factor = 10000)
+	Idents(df) <- "stim"
+	if (ncol(df)<100) de_method = 't' # always use t-test for bulk
+	de.markers <- FindAllMarkers(df,test.use = de_method,min.cells.group = 1) 
+	return(de.markers)
+}
+
+bulk_de = DE_test.all(data_all[[1]], "t")
+
+
+
+
+data[['SAUCIE']] <- NULL  # saucie can't find markers
+
+calc_auc2 = function(res,  label){
+	library(ROCR)
+	library(tidyverse)
+	colors = c("black", "#cb181d", "#6baed6", '#8491B4B2', "#bae4b3", 'orange', "#FFD700", '#3399FF', "#66CC99", '#D55E00', '#7570b3')
+	if (length(res)==10) colors = colors[-7]
+	methods = names(res) 
+	pred_all  <- lapply(res[2:length(methods)], function(x){
+		common.genes <- intersect(rownames(res[[2]]), rownames(res[[1]]))
+		df  <- data.frame(cbind(res[[1]][common.genes, "p_val_adj"], x[common.genes, 'p_val_adj']))
+		colnames(df) = c("bulk", "imp")
+		df$true_label = 0;df$true_label[df$bulk<0.05] = 1
+		pred <- prediction(-log(df$imp), df$true_label)
+		return(pred)
+	})
+
+	auc_all  <- lapply(pred_all, function(x) performance(x, measure = "auc"))
+	perf_all <- lapply(pred_all, function(x) performance(x, "tpr","fpr"))
+	AUCs = unlist(unlist(auc_all)%>%lapply("slot", 'y.values'))			
+	for(i in 1:length(perf_all)){
+	  par.add = (i!=1)
+	  par(cex.axis=1.4, cex = 1.4, cex.lab = 1.4, lwd = 3, cex.main = 2)
+	  plot(perf_all[[i]], col=colors[i] , add = par.add, main = "",lwd = 4, xlab = "False Positive Rate", ylab = "True Positive Rate")
+	  print(paste(names(perf_all)[[i]], round(AUCs[i],2)))
+	}
+	legend(0.57, 0.50, legend=paste(methods[-1],round(AUCs,2), sep = ": "),
+       col=colors, lty = 1, cex=1)
+	abline(a = 0, b = 1)
+}
+
+
+
+
+de.ttest<- lapply(data, function(x) DE_test.chu(x, 't'))
+de.wilcox<- lapply(data, function(x) DE_test.chu(x,'wilcox'))
+
+ex_level = apply(data[[2]], 1, function(x) sum(x!=0, na.rm = T))/ncol(data[[2]])
+high = (ex_level>0.7); low = (ex_level<=0.7) ; 
+sum(high); sum(low)
+
+de.ttest.high <- lapply(de.ttest, function(x)x[intersect(names(which(high)),rownames(x)), ] )
+de.ttest.low  <- lapply(de.ttest, function(x)x[intersect(names(which(low)),rownames(x)), ])
+de.wilcox.high  <- lapply(de.wilcox, function(x) x[intersect(names(which(high)),rownames(x)),, ])
+de.wilcox.low <- lapply(de.wilcox, function(x)x[intersect(names(which(low)),rownames(x)),,])
+
+
+save(de.ttest.high, de.ttest.low, de.wilcox.high, de.wilcox.low, de.ttest, de.wilcox,file = "Data/de_results_CHU_0.7.rda") 
+```
+
+##3. Generate Figure 5
+
+```{r}
+
+addfiglab <- function(lab, xl = par()$mar[2], yl = par()$mar[3]) {
+
+  text(x = line2user(xl, 2), y = line2user(yl, 3), 
+       lab, xpd = NA, font = 2, cex = 3, adj = c(0, 1))
+
+}
+
+pdf('Plots/Figure5_rev2.pdf',width=40, height=20)
+load("Data/de_results_final.rda")
+par(mfrow = c(2,4), oma = c(2, 2, 2, 2))
 calc_auc(de.ttest.high, '')
+addfiglab("A")
 calc_auc(de.ttest.low, '')
 text(line2user(line=mean(par('mar')[c(2, 4)]), side=2), 
      line2user(line = 3.5, side=3), 'T-test', xpd=NA, cex=2, font=2)
 calc_auc(de.wilcox.high,  '')
-text(0.5, 
-     line2user(line=6, side=1), 'Highly Expressed', xpd=NA, cex=2, font=2)
 calc_auc(de.wilcox.low,  '')
 text(line2user(line=mean(par('mar')[c(2, 4)]), side=2), 
      line2user(line=3.5, side=3), 'Wilcoxon Test', xpd=NA, cex=2, font=2)
+load('Data/de_results_CHU_0.7.rda') 
+calc_auc2(de.ttest.high, '')
+addfiglab("B")
+text(0.5, 
+     line2user(line=6, side=1), 'Highly Expressed', xpd=NA, cex=2, font=2)
+calc_auc2(de.ttest.low, '')
+text(0.5, 
+     line2user(line=6, side=1), 'Lowly Expressed', xpd=NA, cex=2, font=2)
+calc_auc2(de.wilcox.high,  '')
+text(0.5, 
+     line2user(line=6, side=1), 'Highly Expressed', xpd=NA, cex=2, font=2)
+calc_auc2(de.wilcox.low,  '')
 text(0.5, 
      line2user(line=6, side=1), 'Lowly Expressed', xpd=NA, cex=2, font=2)
 dev.off()
-
-```
-
-
-```{r}
-# old plot
-
-de.ttest.all = lapply(sc.list, function(x) DE_test(x, 't'))
-de.wilcox.all = lapply(sc.list, function(x) DE_test(x, 'wilcox'))
-pdf('Plots/DE_noStrat.pdf', width = 16, height = 8)
-par(mfrow = c(1,2))
-calc_auc(de.ttest.all, 't-test(all)')
-calc_auc(de.wilcox.all, 'wilcox(all)')
-dev.off()
-
-```
-
-## utility function for plotting 
-```{r}
-line2user <- function(line, side) {
-  lh <- par('cin')[2] * par('cex') * par('lheight')
-  x_off <- diff(grconvertX(0:1, 'inches', 'user'))
-  y_off <- diff(grconvertY(0:1, 'inches', 'user'))
-  switch(side,
-         `1` = par('usr')[3] - line * y_off * lh,
-         `2` = par('usr')[1] - line * x_off * lh,
-         `3` = par('usr')[4] + line * y_off * lh,
-         `4` = par('usr')[2] + line * x_off * lh,
-         stop("side must be 1, 2, 3, or 4", call.=FALSE))
-}
 ```
